@@ -57,6 +57,7 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条桥梁档案记录</span>
+      <span v-if="noticeMessage" class="notice-text">{{ noticeMessage }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -68,16 +69,18 @@ import { onMounted, ref } from 'vue'
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
+type Stat = { label: string; value: number }
 
 const ENDPOINT = '/api/bridge'
 const columns = ["桥梁编码", "桥梁名称", "桥梁类型", "跨越对象", "桥梁全长", "设计荷载", "建成年份", "桥梁状态"]
-const actions = ["办理移交", "申请限载", "封闭桥梁"]
+const actions = ["办理移交", "申请限载", "封闭桥梁", "恢复通行"]
 const statuses = ["待移交", "正常养护", "限载通行", "封闭施工"]
-const stats = [{"label": "在养桥梁", "value": 0}, {"label": "限载桥梁", "value": 0}, {"label": "危旧桥梁", "value": 0}]
 
 const rows = ref<Row[]>([])
+const stats = ref<Stat[]>([{ label: '在养桥梁', value: 0 }, { label: '限载桥梁', value: 0 }, { label: '危旧桥梁', value: 0 }])
 const total = ref(0)
 const errorMessage = ref('')
+const noticeMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
@@ -96,14 +99,17 @@ function openCreate() {
 
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
+  noticeMessage.value = ''
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('桥梁档案动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message ?? '桥梁档案动作未生效，请稍后重试')
     }
+    noticeMessage.value = payload.message ?? ''
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '桥梁档案操作失败'
@@ -112,6 +118,10 @@ async function runAction(action: string, row: Row) {
 
 async function reload() {
   errorMessage.value = ''
+  await Promise.all([loadList(), loadStats()])
+}
+
+async function loadList() {
   const query = new URLSearchParams(filters.value as Record<string, string>).toString()
   try {
     const response = await request(`${ENDPOINT}?${query}`)
@@ -123,6 +133,19 @@ async function reload() {
     total.value = payload.total ?? rows.value.length
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '桥梁档案列表读取失败'
+  }
+}
+
+async function loadStats() {
+  try {
+    const response = await request(`${ENDPOINT}/stats`)
+    if (!response.ok) {
+      throw new Error('桥梁统计读取失败')
+    }
+    const payload = await response.json()
+    stats.value = payload.stats ?? stats.value
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '桥梁统计读取失败'
   }
 }
 

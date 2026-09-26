@@ -71,15 +71,17 @@ type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/bridge'
 const columns = ["桥梁编码", "桥梁名称", "桥梁类型", "跨越对象", "桥梁全长", "设计荷载", "建成年份", "桥梁状态"]
-const actions = ["办理移交", "申请限载", "封闭桥梁"]
+const actions = ["办理移交", "申请限载", "封闭桥梁", "恢复通行"]
 const statuses = ["待移交", "正常养护", "限载通行", "封闭施工"]
-const stats = [{"label": "在养桥梁", "value": 0}, {"label": "限载桥梁", "value": 0}, {"label": "危旧桥梁", "value": 0}]
+
+type StatCard = { label: string; value: number }
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const stats = ref<StatCard[]>([{"label": "在养桥梁", "value": 0}, {"label": "限载桥梁", "value": 0}, {"label": "危旧桥梁", "value": 0}])
 
 function resetFilters() {
   filters.value = {}
@@ -99,14 +101,30 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('桥梁档案动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.message ?? '桥梁档案动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '桥梁档案操作失败'
+  }
+}
+
+async function reloadStats() {
+  try {
+    const response = await request(`${ENDPOINT}/stats`)
+    if (!response.ok) {
+      return
+    }
+    const payload = await response.json()
+    if (Array.isArray(payload.cards) && payload.cards.length) {
+      stats.value = payload.cards
+    }
+  } catch {
+    // 统计卡片读取失败时保留上一次数值，不阻断列表展示
   }
 }
 
@@ -121,6 +139,7 @@ async function reload() {
     const payload = await response.json()
     rows.value = payload.items ?? []
     total.value = payload.total ?? rows.value.length
+    await reloadStats()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '桥梁档案列表读取失败'
   }
